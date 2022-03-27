@@ -6,6 +6,7 @@ import StakeHistory from "./components/StakeHistory/StakeHistory";
 import Footer from "./components/Footer/Footer";
 import { ethers, utils, Contract } from "ethers";
 import BRTTokenAbi from "./utils/web3/abi.json";
+import { formatDate } from "./utils/helpers";
 const BRTTokenAddress = "0x169E82570feAc981780F3C48Ee9f05CED1328e1b";
 
 function App() {
@@ -31,8 +32,12 @@ function App() {
   // the value of token the user wants to withdraw
   const [withdrawInput, setWithdrawInput] = useState("");
 
+  const [addressInput, setAddressInput] = useState("");
+
   // all stake history data displayed on the history table
   const [stateHistory, setStakeHistory] = useState([]);
+
+  const [userTotal, setUserTotal] = useState([]);
 
   // helper function for getting the matic and token balance, given an address
   const getAccountDetails = async (address) => {
@@ -156,43 +161,6 @@ function App() {
     });
   };
 
-  // {
-  //     amount: 1000,
-  //     account: "0xE428Db9A3B47046acb020B8B5a5B29b8792a1415",
-  //     time: "1647975426",
-  //     type: "stake",
-  //   },
-  //   {
-  //     amount: 1000,
-  //     account: "0xE428Db9A3B47046acb020B8B5a5B29b8792a1415",
-  //     time: "1647975426",
-  //     type: "stake",
-  //   },
-  //   {
-  //     amount: 1000,
-  //     account: "0xE428Db9A3B47046acb020B8B5a5B29b8792a1415",
-  //     time: "1647975426",
-  //     type: "unstake",
-  //   },
-  //   {
-  //     amount: 1000,
-  //     account: "0xE428Db9A3B47046acb020B8B5a5B29b8792a1415",
-  //     time: "1647975426",
-  //     type: "stake",
-  //   },
-  //   {
-  //     amount: 1000,
-  //     account: "0xE428Db9A3B47046acb020B8B5a5B29b8792a1415",
-  //     time: "1647975426",
-  //     type: "unstake",
-  //   },
-  //   {
-  //     amount: 1000,
-  //     account: "0xE428Db9A3B47046acb020B8B5a5B29b8792a1415",
-  //     time: "1647975426",
-  //     type: "stake",
-  //   },
-
   useEffect(() => {
     init();
     if (!window.ethereum) return;
@@ -221,9 +189,44 @@ function App() {
         setWithdrawInput(target.value);
         break;
 
+      case "getAddress":
+        setAddressInput(target.value);
+        break;
+
       default:
         break;
     }
+  };
+
+  const getStake = async () => {
+    const provider = new ethers.providers.Web3Provider(window.ethereum);
+    const signer = provider.getSigner();
+    const BRTContractInstance = new Contract(
+      BRTTokenAddress,
+      BRTTokenAbi,
+      signer
+    );
+    const myStake = await BRTContractInstance.myStake();
+    const stake = utils.formatUnits(myStake.stakeAmount, 18);
+    setStakeAmount(stake);
+
+    // getting last stake in seconds
+    const latestStake = formatDate(myStake.time.toString());
+    const newStakeTime = new Date(latestStake);
+    const stakeSeconds = Math.floor(newStakeTime.getTime() / 1000);
+
+    //current day in seconds
+    const currentDay = new Date();
+    const currentDaySeconds = Math.floor(currentDay.getTime() / 1000);
+
+    // getting the difference between the latest stake and current day
+    const timeDifference = currentDaySeconds - stakeSeconds;
+
+    //showing reward after 3 days otherwise showing 0
+    if (timeDifference >= 259200) {
+      const reward = 0.0000000386 * timeDifference * stake;
+      setRewardAmount(reward.toFixed(3));
+    } else setRewardAmount("00.00");
   };
 
   // A function that handles staking
@@ -240,18 +243,68 @@ function App() {
     );
     const weiValue = utils.parseEther(stakeInput);
     const stakeTx = await BRTContractInstance.stakeBRT(weiValue);
+    await stakeTx.wait();
+    await getStake();
+    setStakeInput("");
 
-    const stakeTxHash = await provider.getTransaction(stakeTx.hash);
-    const response = await stakeTx.wait();
-
-    const address = response.events[1].args[0];
-    const amountStaked = response.events[1].args[1].toString();
-    const time = response.events[1].args[2].toString();
+    const accounts = await provider.listAccounts();
+    if (!accounts.length) return;
+    const accountDetails = await getAccountDetails(accounts[0]);
+    setUserInfo({
+      matic_balance: accountDetails.userMaticBal,
+      token_balance: accountDetails.userBRTBalance,
+      address: accounts[0],
+    });
+    setConnected(true);
   };
 
-  const onClickWithdraw = (e) => {
+  const onClickWithdraw = async (e) => {
     e.preventDefault();
-    console.log("unstaking...........", withdrawInput);
+    if (withdrawInput < 0) return alert("Please enter a valid amount");
+
+    const provider = new ethers.providers.Web3Provider(window.ethereum);
+    const signer = provider.getSigner();
+    const BRTContractInstance = new Contract(
+      BRTTokenAddress,
+      BRTTokenAbi,
+      signer
+    );
+    const weiValue = utils.parseEther(withdrawInput);
+    const unStakeTx = await BRTContractInstance.withdraw(weiValue);
+    await unStakeTx.wait();
+    await getStake();
+    setWithdrawInput("");
+
+    const accounts = await provider.listAccounts();
+    if (!accounts.length) return;
+    const accountDetails = await getAccountDetails(accounts[0]);
+    setUserInfo({
+      matic_balance: accountDetails.userMaticBal,
+      token_balance: accountDetails.userBRTBalance,
+      address: accounts[0],
+    });
+    setConnected(true);
+  };
+
+  const onClickGetAddress = async (e) => {
+    e.preventDefault();
+    const customProvider = new ethers.providers.JsonRpcProvider(
+      process.env.REACT_APP_RPC_URL
+    );
+    const BRTContractInstance = new Contract(
+      BRTTokenAddress,
+      BRTTokenAbi,
+      customProvider
+    );
+    const userReward = await BRTContractInstance.getStakeByAddress(
+      addressInput
+    );
+
+    setUserTotal({
+      account: userReward.staker.toString(),
+      amount: utils.formatUnits(userReward.stakeAmount, 18),
+      time: formatDate(userReward.time),
+    });
   };
 
   return (
@@ -266,11 +319,14 @@ function App() {
           stakeInput={stakeInput}
           withdrawInput={withdrawInput}
           onChangeInput={onChangeInput}
+          addressInput={addressInput}
+          userTotal={userTotal}
           onClickStake={onClickStake}
           onClickWithdraw={onClickWithdraw}
           stakeAmount={stakeAmount}
           rewardAmount={rewardAmount}
           connected={connected}
+          onClickGetAddress={onClickGetAddress}
         />
         <StakeHistory stakeData={stateHistory} />
       </main>

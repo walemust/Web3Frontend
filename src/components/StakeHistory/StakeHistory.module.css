@@ -9,6 +9,11 @@
   width: 100%;
 }
 
+.scroll {
+  max-height: 15rem;
+  overflow-y: scroll;
+}
+
 .table_header {
   background-color: rgb(235, 18, 18);
   color: white;
@@ -35,4 +40,12 @@
 
 .table_data {
   padding: 1rem;
+}
+
+.stake_style {
+  background-color: rgb(209, 206, 206);
+}
+
+.unstake_style {
+  background-color: rgb(240, 239, 239);
 }
